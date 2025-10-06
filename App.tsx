@@ -5,10 +5,9 @@ import {
   StyleSheet,
   TouchableOpacity,
   Dimensions,
-  Alert,
 } from 'react-native';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 interface GameState {
   currentStage: number;
@@ -62,7 +61,6 @@ const WordQuizGame: React.FC = () => {
 
   // 스테이지별 난이도 설정
   const getStageDifficulty = (stage: number, mode: 'easy' | 'hard') => {
-    const isEasyMode = mode === 'easy';
     const baseCount = 30; // 모든 모드에서 동일한 단어 수
     const countMultiplier = 1 + (stage - 1) * 0.25; // 모든 모드에서 동일한 증가율 (15% → 25%)
     const wordCount = Math.floor(baseCount * countMultiplier);
@@ -465,10 +463,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#bdc3c7',
   },
-  correctWordButton: {
-    borderColor: '#27ae60',
-    backgroundColor: '#d5f4e6',
-  },
   wordText: {
     fontSize: 10,
     fontWeight: 'bold',
@@ -589,12 +583,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#e74c3c',
     marginBottom: 20,
-    textAlign: 'center',
-  },
-  wrongAnswerMessage: {
-    fontSize: 18,
-    color: '#2c3e50',
-    marginBottom: 30,
     textAlign: 'center',
   },
   backToMainButton: {
