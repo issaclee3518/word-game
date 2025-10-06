@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,168 +9,374 @@ import {
 
 const { width } = Dimensions.get('window');
 
+// Types
 interface GameState {
   currentStage: number;
   maxStage: number;
   timeLeft: number;
   gameOver: boolean;
   correctWord: string;
-  wrongWords: string[];
   allWords: string[];
-  timeUp: boolean;
   showStageSelection: boolean;
   unlockedStages: number[];
   showWrongAnswer: boolean;
-  gameMode: 'easy' | 'hard';
-  flickeringIndex: number;
-  flickeringIndex2: number;
-  failureReason: 'wrong' | 'timeout';
+  gameMode: GameMode;
+  flickeringIndices: number[];
+  failureReason: FailureReason;
 }
 
-const WordQuizGame: React.FC = () => {
-  const [gameState, setGameState] = useState<GameState>({
-    currentStage: 1,
-    maxStage: 10,
-    timeLeft: 20,
-    gameOver: false,
-    correctWord: '',
-    wrongWords: [],
-    allWords: [],
-    timeUp: false,
-    showStageSelection: true,
-    unlockedStages: [1],
-    showWrongAnswer: false,
-    gameMode: 'easy',
-    flickeringIndex: -1,
-    flickeringIndex2: -1,
-    failureReason: 'wrong',
-  });
+type GameMode = 'easy' | 'hard';
+type FailureReason = 'wrong' | 'timeout';
+type GameScreen = 'stageSelection' | 'game' | 'wrongAnswer' | 'gameOver';
 
-  // 한 글자 차이나는 단어 세트들
-  const wordSets = [
-    { correct: '당군', baseWord: '당근' },
-    { correct: '이식', baseWord: '이삭' },
-    { correct: '마이스', baseWord: '마우스' },
-    { correct: '닰', baseWord: '닭' },
-    { correct: '옥톱방', baseWord: '옥탑방'},
-    { correct: '아머리카노', baseWord: '아메리카노'},
-    { correct: '프로펠러', baseWord: '프로펠라'},
-    { correct: '미우스', baseWord: '마우스'},
-  ];
+interface WordSet {
+  correct: string;
+  baseWord: string;
+}
 
+interface StageDifficulty {
+  wordCount: number;
+  fontSize: number;
+  buttonSize: number;
+  timeLimit: number;
+}
 
-  // 스테이지별 난이도 설정
-  const getStageDifficulty = (stage: number, mode: 'easy' | 'hard') => {
-    const baseCount = 30; // 모든 모드에서 동일한 단어 수
-    const countMultiplier = 1 + (stage - 1) * 0.25; // 모든 모드에서 동일한 증가율 (15% → 25%)
+// Constants
+const WORD_SETS: WordSet[] = [
+  { correct: '당군', baseWord: '당근' },
+  { correct: '이식', baseWord: '이삭' },
+  { correct: '마이스', baseWord: '마우스' },
+  { correct: '닰', baseWord: '닭' },
+  { correct: '옥톱방', baseWord: '옥탑방' },
+  { correct: '아머리카노', baseWord: '아메리카노' },
+  { correct: '프로펠러', baseWord: '프로펠라' },
+  { correct: '미우스', baseWord: '마우스' },
+];
+
+const MAX_STAGE = 10;
+const BASE_TIME_LIMIT = 20;
+
+// Game Logic Services
+class DifficultyCalculator {
+  static calculateStageDifficulty(stage: number, mode: GameMode): StageDifficulty {
+    const baseCount = mode === 'easy' ? 20 : 30;
+    const countMultiplier = 1 + (stage - 1) * 0.25;
     const wordCount = Math.floor(baseCount * countMultiplier);
     
-    // 마지막 스테이지(10)의 크기를 기준으로 역순으로 계산
-    const maxStage = 10;
-    const lastStageFontSize = 16; // 마지막 스테이지 글자 크기 조금 더 증가
-    const lastStageButtonSize = width * 0.10; // 마지막 스테이지 버튼 크기 조금 더 증가
+    const lastStageFontSize = 16;
+    const lastStageButtonSize = width * 0.10;
     
-    // 스테이지가 낮을수록 크기가 커지도록 역순 계산
-    const fontSize = lastStageFontSize + (maxStage - stage) * 0.8; // 스테이지가 낮을수록 크기 증가
-    const buttonSize = lastStageButtonSize + (maxStage - stage) * 0.004; // 스테이지가 낮을수록 크기 증가
+    const fontSize = lastStageFontSize + (MAX_STAGE - stage) * 0.8;
+    const buttonSize = lastStageButtonSize + (MAX_STAGE - stage) * 0.004;
     
     return {
       wordCount,
       fontSize,
       buttonSize,
-      timeLimit: 20, // 모든 스테이지 20초로 통일
+      timeLimit: BASE_TIME_LIMIT,
     };
-  };
+  }
+}
 
-  // 게임 초기화
-  const initializeGame = (stage: number = gameState.currentStage) => {
-    // 랜덤으로 단어 세트 선택
-    const randomSet = wordSets[Math.floor(Math.random() * wordSets.length)];
-    const correctWord = randomSet.correct;
-    const baseWord = randomSet.baseWord;
+class WordGenerator {
+  static generateWords(stage: number, mode: GameMode): { correctWord: string; allWords: string[] } {
+    const randomSet = WORD_SETS[Math.floor(Math.random() * WORD_SETS.length)];
+    const difficulty = DifficultyCalculator.calculateStageDifficulty(stage, mode);
     
-    // 스테이지별 난이도 적용
-    const difficulty = getStageDifficulty(stage, gameState.gameMode);
-    const wrongWords = Array(difficulty.wordCount).fill(baseWord);
-    const allWords = [...wrongWords, correctWord];
+    const wrongWords = Array(difficulty.wordCount).fill(randomSet.baseWord);
+    const allWords = [...wrongWords, randomSet.correct];
     
-    // 배열 섞기
+    // Fisher-Yates shuffle
     for (let i = allWords.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [allWords[i], allWords[j]] = [allWords[j], allWords[i]];
     }
+    
+    return { correctWord: randomSet.correct, allWords };
+  }
+}
 
+class GameStateManager {
+  static getInitialState(): GameState {
+    return {
+      currentStage: 1,
+      maxStage: MAX_STAGE,
+      timeLeft: BASE_TIME_LIMIT,
+      gameOver: false,
+      correctWord: '',
+      allWords: [],
+      showStageSelection: true,
+      unlockedStages: [1],
+      showWrongAnswer: false,
+      gameMode: 'easy',
+      flickeringIndices: [],
+      failureReason: 'wrong',
+    };
+  }
+}
+
+// Custom Hooks
+
+function useFlickeringEffect(
+  gameMode: GameMode,
+  isGameActive: boolean,
+  wordCount: number,
+  stage: number
+): number[] {
+  const [flickeringIndices, setFlickeringIndices] = useState<number[]>([]);
+
+  useEffect(() => {
+    if (gameMode === 'hard' && isGameActive) {
+      const interval = setInterval(() => {
+        const newIndices: number[] = [];
+        
+        // Always one flickering light
+        newIndices.push(Math.floor(Math.random() * wordCount));
+        
+        // Two lights from stage 5 onwards
+        if (stage >= 5) {
+          let secondIndex;
+          do {
+            secondIndex = Math.floor(Math.random() * wordCount);
+          } while (secondIndex === newIndices[0]);
+          newIndices.push(secondIndex);
+        }
+        
+        setFlickeringIndices(newIndices);
+      }, 300);
+
+      return () => clearInterval(interval);
+    } else {
+      setFlickeringIndices([]);
+    }
+  }, [gameMode, isGameActive, wordCount, stage]);
+
+  return flickeringIndices;
+}
+
+// UI Components
+const StageSelectionScreen: React.FC<{
+  gameState: GameState;
+  onStageSelect: (stage: number) => void;
+  onModeToggle: () => void;
+}> = ({ gameState, onStageSelect, onModeToggle }) => (
+  <View style={styles.container}>
+    <View style={styles.stageSelectionContainer}>
+      <Text style={styles.stageSelectionTitle}>스테이지 선택</Text>
+      <Text style={styles.challengeMessage}>한번에 스테이지 10까지 깨보세요!</Text>
+      
+      <View style={styles.modeSelector}>
+        <TouchableOpacity 
+          style={[
+            styles.modeButton, 
+            gameState.gameMode === 'easy' && styles.activeEasyModeButton
+          ]} 
+          onPress={onModeToggle}
+        >
+          <Text style={[
+            styles.modeButtonText,
+            gameState.gameMode === 'easy' && styles.activeModeButtonText
+          ]}>
+            이지 모드
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[
+            styles.modeButton, 
+            gameState.gameMode === 'hard' && styles.activeHardModeButton
+          ]} 
+          onPress={onModeToggle}
+        >
+          <Text style={[
+            styles.modeButtonText,
+            gameState.gameMode === 'hard' && styles.activeModeButtonText
+          ]}>
+            하드 모드
+          </Text>
+        </TouchableOpacity>
+      </View>
+      
+      <View style={styles.stagesGrid}>
+        {Array.from({ length: gameState.maxStage }, (_, i) => i + 1).map(stage => (
+          <TouchableOpacity
+            key={stage}
+            style={[
+              styles.stageButton,
+              gameState.unlockedStages.includes(stage) ? styles.unlockedStage : styles.lockedStage
+            ]}
+            onPress={() => gameState.unlockedStages.includes(stage) && onStageSelect(stage)}
+            disabled={!gameState.unlockedStages.includes(stage)}
+          >
+            <Text style={[
+              styles.stageButtonText,
+              !gameState.unlockedStages.includes(stage) && styles.lockedStageText
+            ]}>
+              {stage}
+            </Text>
+            {stage > 1 && !gameState.unlockedStages.includes(stage) && (
+              <Text style={styles.lockIcon}>🔒</Text>
+            )}
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  </View>
+);
+
+const GameScreen: React.FC<{
+  gameState: GameState;
+  onWordClick: (word: string) => void;
+}> = ({ gameState, onWordClick }) => {
+  const difficulty = DifficultyCalculator.calculateStageDifficulty(
+    gameState.currentStage, 
+    gameState.gameMode
+  );
+  
+  const isGameActive = !gameState.gameOver && !gameState.showWrongAnswer;
+  const flickeringIndices = useFlickeringEffect(
+    gameState.gameMode,
+    isGameActive,
+    gameState.allWords.length,
+    gameState.currentStage
+  );
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <View style={styles.infoRow}>
+          <Text style={styles.stageText}>스테이지: {gameState.currentStage}</Text>
+        </View>
+        <View style={styles.timerContainer}>
+          <Text style={[
+            styles.timerText, 
+            gameState.timeLeft <= 5 && styles.timerWarning
+          ]}>
+            ⏰ {gameState.timeLeft}초
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.instructionsContainer}>
+        <Text style={styles.instructionsTitle}>한 글자만 다른 단어를 찾으세요!</Text>
+        <Text style={styles.instructionsSubtitle}>
+          같은 단어들 중에서 다른 단어 하나를 찾아 클릭하세요!
+        </Text>
+      </View>
+
+      <View style={styles.wordsGrid}>
+        {gameState.allWords.map((word, index) => {
+          const isFlickering = flickeringIndices.includes(index);
+          
+          return (
+            <TouchableOpacity
+              key={index}
+              style={[
+                styles.wordButton,
+                {
+                  minWidth: difficulty.buttonSize,
+                  backgroundColor: isFlickering ? '#27ae60' : '#fff',
+                  borderColor: isFlickering ? '#27ae60' : '#bdc3c7',
+                }
+              ]}
+              onPress={() => onWordClick(word)}
+            >
+              <Text style={[
+                styles.wordText,
+                {
+                  fontSize: difficulty.fontSize,
+                  color: isFlickering ? '#fff' : '#2c3e50',
+                }
+              ]}>
+                {word}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+};
+
+const WrongAnswerScreen: React.FC<{
+  failureReason: FailureReason;
+  onBackToMain: () => void;
+}> = ({ failureReason, onBackToMain }) => (
+  <View style={styles.container}>
+    <View style={styles.wrongAnswerContainer}>
+      <Text style={styles.wrongAnswerTitle}>
+        {failureReason === 'timeout' ? '⏰ 시간 초과!' : '❌ 실패!'}
+      </Text>
+      <TouchableOpacity style={styles.backToMainButton} onPress={onBackToMain}>
+        <Text style={styles.backToMainButtonText}>메인화면으로 돌아가기</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+);
+
+// Main Game Component
+const WordQuizGame: React.FC = () => {
+  const [gameState, setGameState] = useState<GameState>(GameStateManager.getInitialState());
+
+  // Timer effect will be handled in the timer countdown useEffect
+
+  // Game initialization
+  const initializeGame = useCallback((stage: number = gameState.currentStage) => {
+    const { correctWord, allWords } = WordGenerator.generateWords(stage, gameState.gameMode);
+    
     setGameState(prev => ({
       ...prev,
       correctWord,
-      wrongWords,
       allWords,
-      timeLeft: difficulty.timeLimit,
+      timeLeft: BASE_TIME_LIMIT,
       gameOver: false,
       timeUp: false,
     }));
-  };
+  }, [gameState.gameMode]);
 
-  // 타이머 효과
+  // Timer countdown (only during active gameplay)
   useEffect(() => {
-    if (!gameState.gameOver && gameState.timeLeft > 0) {
+    if (!gameState.gameOver && 
+        gameState.timeLeft > 0 && 
+        !gameState.showWrongAnswer && 
+        !gameState.showStageSelection) {
       const timer = setTimeout(() => {
-        setGameState(prev => ({
-          ...prev,
-          timeLeft: prev.timeLeft - 1,
-        }));
+        setGameState(prev => ({ ...prev, timeLeft: prev.timeLeft - 1 }));
       }, 1000);
       return () => clearTimeout(timer);
-    } else if (gameState.timeLeft === 0 && !gameState.gameOver) {
-      // 시간 초과 시 실패 화면 표시
+    } else if (gameState.timeLeft === 0 && 
+               !gameState.gameOver && 
+               !gameState.showWrongAnswer && 
+               !gameState.showStageSelection) {
+      // Time's up!
       setGameState(prev => ({
         ...prev,
         showWrongAnswer: true,
         failureReason: 'timeout',
       }));
     }
-  }, [gameState.timeLeft, gameState.gameOver]);
+  }, [gameState.timeLeft, gameState.gameOver, gameState.showWrongAnswer, gameState.showStageSelection]);
 
-  // 하드모드 반짝임 효과
-  useEffect(() => {
-    if (gameState.gameMode === 'hard' && !gameState.gameOver && !gameState.showStageSelection && !gameState.showWrongAnswer) {
-      const flickerTimer = setInterval(() => {
-        setGameState(prev => {
-          const newIndex1 = Math.floor(Math.random() * prev.allWords.length);
-          let newIndex2 = -1;
-          
-          // 스테이지 5부터는 두 개의 불빛
-          if (prev.currentStage >= 5) {
-            do {
-              newIndex2 = Math.floor(Math.random() * prev.allWords.length);
-            } while (newIndex2 === newIndex1); // 두 불빛이 같은 위치에 오지 않도록
-          }
-          
-          return {
-            ...prev,
-            flickeringIndex: newIndex1,
-            flickeringIndex2: newIndex2,
-          };
-        });
-      }, 300); // 300ms마다 반짝임
-
-      return () => clearInterval(flickerTimer);
-    }
-  }, [gameState.gameMode, gameState.gameOver, gameState.showStageSelection, gameState.showWrongAnswer, gameState.allWords.length, gameState.currentStage]);
-
-  // 게임 시작 시 초기화
+  // Initialize game when starting
   useEffect(() => {
     if (!gameState.showStageSelection) {
       initializeGame();
     }
-  }, [gameState.currentStage, gameState.showStageSelection]);
+  }, [gameState.currentStage, gameState.showStageSelection, initializeGame]);
 
-  // 단어 클릭 처리
-  const handleWordClick = (word: string) => {
-    if (gameState.gameOver) return;
+  // Event handlers
+  const handleStageSelect = useCallback((stage: number) => {
+    setGameState(prev => ({
+      ...prev,
+      currentStage: stage,
+      showStageSelection: false,
+      gameOver: false,
+    }));
+  }, []);
+
+  const handleWordClick = useCallback((word: string) => {
+    if (gameState.gameOver || gameState.showWrongAnswer) return;
 
     if (word === gameState.correctWord) {
-      // 정답! 바로 다음 스테이지로
       const nextStage = gameState.currentStage + 1;
       
       setGameState(prev => ({
@@ -183,207 +389,66 @@ const WordQuizGame: React.FC = () => {
         gameOver: false,
       }));
     } else {
-      // 오답! 틀렸다는 알림 표시
       setGameState(prev => ({
         ...prev,
         showWrongAnswer: true,
         failureReason: 'wrong',
       }));
     }
-  };
+  }, [gameState.correctWord, gameState.gameOver, gameState.showWrongAnswer, gameState.currentStage]);
 
-  // 스테이지 선택
-  const selectStage = (stage: number) => {
-    setGameState(prev => ({
-      ...prev,
-      currentStage: stage,
-      showStageSelection: false,
-      gameOver: false,
-    }));
-  };
-
-
-  // 메인화면으로 돌아가기
-  const backToMain = () => {
-    setGameState(prev => ({
-      ...prev,
-      currentStage: 1,
-      gameOver: false,
-      showStageSelection: true,
-      showWrongAnswer: false,
-      unlockedStages: [1],
-      failureReason: 'wrong',
-    }));
-  };
-
-  // 게임 모드 변경
-  const toggleGameMode = () => {
+  const handleModeToggle = useCallback(() => {
     setGameState(prev => ({
       ...prev,
       gameMode: prev.gameMode === 'easy' ? 'hard' : 'easy',
     }));
+  }, []);
+
+  const handleBackToMain = useCallback(() => {
+    setGameState(GameStateManager.getInitialState());
+  }, []);
+
+  // Determine current screen
+  const getCurrentScreen = (): GameScreen => {
+    if (gameState.showWrongAnswer) return 'wrongAnswer';
+    if (gameState.gameOver) return 'gameOver';
+    if (gameState.showStageSelection) return 'stageSelection';
+    return 'game';
   };
 
-
-  // 틀렸을 때 화면
-  if (gameState.showWrongAnswer) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.wrongAnswerContainer}>
-          <Text style={styles.wrongAnswerTitle}>
-            {gameState.failureReason === 'timeout' ? '⏰ 시간 초과!' : '❌ 실패!'}
-          </Text>
-          <TouchableOpacity style={styles.backToMainButton} onPress={backToMain}>
-            <Text style={styles.backToMainButtonText}>메인화면으로 돌아가기</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
+  // Render appropriate screen
+  switch (getCurrentScreen()) {
+    case 'stageSelection':
+      return (
+        <StageSelectionScreen
+          gameState={gameState}
+          onStageSelect={handleStageSelect}
+          onModeToggle={handleModeToggle}
+        />
+      );
+    
+    case 'game':
+      return (
+        <GameScreen
+          gameState={gameState}
+          onWordClick={handleWordClick}
+        />
+      );
+    
+    case 'wrongAnswer':
+      return (
+        <WrongAnswerScreen
+          failureReason={gameState.failureReason}
+          onBackToMain={handleBackToMain}
+        />
+      );
+    
+    default:
+      return <StageSelectionScreen gameState={gameState} onStageSelect={handleStageSelect} onModeToggle={handleModeToggle} />;
   }
-
-  // 게임 오버 화면
-  if (gameState.gameOver) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.gameOverContainer}>
-          <Text style={styles.gameOverTitle}>
-            {gameState.timeUp ? '⏰ 시간 초과!' : '❌ 게임 오버!'}
-          </Text>
-          <Text style={styles.stageReached}>스테이지: {gameState.currentStage}</Text>
-          <TouchableOpacity style={styles.backToMainButton} onPress={backToMain}>
-            <Text style={styles.backToMainButtonText}>메인화면으로 돌아가기</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  // 스테이지 선택 화면
-  if (gameState.showStageSelection) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.stageSelectionContainer}>
-          <Text style={styles.stageSelectionTitle}>스테이지 선택</Text>
-          <Text style={styles.challengeMessage}>한번에 스테이지 10까지 깨보세요!</Text>
-          
-          {/* 게임 모드 선택 */}
-          <View style={styles.modeSelector}>
-            <TouchableOpacity 
-              style={[
-                styles.modeButton, 
-                gameState.gameMode === 'easy' && styles.activeEasyModeButton
-              ]} 
-              onPress={toggleGameMode}
-            >
-              <Text style={[
-                styles.modeButtonText,
-                gameState.gameMode === 'easy' && styles.activeModeButtonText
-              ]}>
-                이지 모드
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[
-                styles.modeButton, 
-                gameState.gameMode === 'hard' && styles.activeHardModeButton
-              ]} 
-              onPress={toggleGameMode}
-            >
-              <Text style={[
-                styles.modeButtonText,
-                gameState.gameMode === 'hard' && styles.activeModeButtonText
-              ]}>
-                하드 모드
-              </Text>
-            </TouchableOpacity>
-          </View>
-          
-          <View style={styles.stagesGrid}>
-            {Array.from({ length: gameState.maxStage }, (_, i) => i + 1).map(stage => (
-              <TouchableOpacity
-                key={stage}
-                style={[
-                  styles.stageButton,
-                  gameState.unlockedStages.includes(stage) ? styles.unlockedStage : styles.lockedStage
-                ]}
-                onPress={() => gameState.unlockedStages.includes(stage) && selectStage(stage)}
-                disabled={!gameState.unlockedStages.includes(stage)}
-              >
-                <Text style={[
-                  styles.stageButtonText,
-                  !gameState.unlockedStages.includes(stage) && styles.lockedStageText
-                ]}>
-                  {stage}
-                </Text>
-                {stage > 1 && !gameState.unlockedStages.includes(stage) && (
-                  <Text style={styles.lockIcon}>🔒</Text>
-                )}
-              </TouchableOpacity>
-            ))}
-          </View>
-          
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.container}>
-      {/* 상단 정보 */}
-      <View style={styles.header}>
-        <View style={styles.infoRow}>
-          <Text style={styles.stageText}>스테이지: {gameState.currentStage}</Text>
-        </View>
-        <View style={styles.timerContainer}>
-          <Text style={[styles.timerText, gameState.timeLeft <= 5 && styles.timerWarning]}>
-            ⏰ {gameState.timeLeft}초
-          </Text>
-        </View>
-      </View>
-
-      {/* 게임 설명 */}
-      <View style={styles.instructionsContainer}>
-        <Text style={styles.instructionsTitle}>한 글자만 다른 단어를 찾으세요!</Text>
-        <Text style={styles.instructionsSubtitle}>
-          같은 단어들 중에서 다른 단어 하나를 찾아 클릭하세요!
-        </Text>
-      </View>
-
-      {/* 단어 그리드 */}
-      <View style={styles.wordsGrid}>
-        {gameState.allWords.map((word, index) => {
-          const difficulty = getStageDifficulty(gameState.currentStage, gameState.gameMode);
-          const isFlickering1 = gameState.gameMode === 'hard' && gameState.flickeringIndex === index;
-          const isFlickering2 = gameState.gameMode === 'hard' && gameState.flickeringIndex2 === index;
-          const isFlickering = isFlickering1 || isFlickering2;
-          
-          const buttonStyle = {
-            ...styles.wordButton,
-            minWidth: difficulty.buttonSize,
-            backgroundColor: isFlickering ? '#27ae60' : '#fff',
-            borderColor: isFlickering ? '#27ae60' : '#bdc3c7',
-          };
-          const textStyle = {
-            ...styles.wordText,
-            fontSize: difficulty.fontSize,
-            color: isFlickering ? '#fff' : '#2c3e50',
-          };
-          
-          return (
-            <TouchableOpacity
-              key={index}
-              style={buttonStyle}
-              onPress={() => handleWordClick(word)}
-            >
-              <Text style={textStyle}>{word}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    </View>
-  );
 };
 
+// Styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -467,24 +532,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: 'bold',
     color: '#2c3e50',
-  },
-  gameOverContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  gameOverTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#e74c3c',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  stageReached: {
-    fontSize: 20,
-    color: '#7f8c8d',
-    marginBottom: 30,
   },
   stageSelectionContainer: {
     flex: 1,
