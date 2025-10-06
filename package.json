@@ -11,7 +11,7 @@
     "build": "expo export --platform web --output-dir dist && npm run flatten-dist",
     "build:web": "expo export --platform web --output-dir dist && npm run flatten-dist",
     "preview:web": "expo export --platform web && npx serve dist",
-    "flatten-dist": "node -e \"const fs=require('fs');const path=require('path');const jsFile=fs.readdirSync('dist/_expo/static/js/web/')[0];fs.copyFileSync('dist/_expo/static/js/web/'+jsFile,'dist/app.js');fs.writeFileSync('dist/_redirects','/*    /index.html   200');fs.rmSync('dist/_expo',{recursive:true,force:true});\""
+    "flatten-dist": "node -e \"const fs=require('fs');const path=require('path');const jsFile=fs.readdirSync('dist/_expo/static/js/web/')[0];fs.copyFileSync('dist/_expo/static/js/web/'+jsFile,'dist/app.js');fs.writeFileSync('dist/_redirects','/* /index.html 200');fs.writeFileSync('dist/_headers','/*\\n  X-Frame-Options: DENY\\n  X-XSS-Protection: 1; mode=block\\n  Referrer-Policy: strict-origin-when-cross-origin\\n\\n/index.html\\n  Content-Type: text/html; charset=utf-8');fs.mkdirSync('dist/functions',{recursive:true});fs.writeFileSync('dist/functions/_middleware.js','export function onRequest(context) {\\n  const url = new URL(context.request.url);\\n  if (url.pathname !== \"/\" && !url.pathname.includes(\".\")) {\\n    return new Response(null, {\\n      status: 302,\\n      headers: { \'Location\': \'/index.html\' }\\n    });\\n  }\\n  return context.next();\\n}');fs.rmSync('dist/_expo',{recursive:true,force:true});\""
   },
   "dependencies": {
     "expo": "~54.0.12",
@@ -25,5 +25,6 @@
     "@types/react": "~19.1.0",
     "typescript": "~5.9.2"
   },
-  "private": true
+  "private": true,
+  "homepage": "."
 }
