@@ -1,9 +1,0 @@
-name = "word-quiz-game"
-compatibility_date = "2025-01-06"
-
-[build]
-command = "npm ci && npm run build:web"
-publish = "dist"
-
-[[build.environment]]
-NODE_VERSION = "18"
