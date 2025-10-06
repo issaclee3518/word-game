@@ -9,6 +9,7 @@ import {
 
 const { width } = Dimensions.get('window');
 
+
 // Types
 interface GameState {
   currentStage: number;
@@ -27,7 +28,7 @@ interface GameState {
 
 type GameMode = 'easy' | 'hard';
 type FailureReason = 'wrong' | 'timeout';
-type GameScreen = 'stageSelection' | 'game' | 'wrongAnswer' | 'gameOver';
+type GameScreen = 'stageSelection' | 'game' | 'wrongAnswer';
 
 interface WordSet {
   correct: string;
@@ -329,7 +330,6 @@ const WordQuizGame: React.FC = () => {
       allWords,
       timeLeft: BASE_TIME_LIMIT,
       gameOver: false,
-      timeUp: false,
     }));
   }, [gameState.gameMode]);
 
@@ -411,7 +411,6 @@ const WordQuizGame: React.FC = () => {
   // Determine current screen
   const getCurrentScreen = (): GameScreen => {
     if (gameState.showWrongAnswer) return 'wrongAnswer';
-    if (gameState.gameOver) return 'gameOver';
     if (gameState.showStageSelection) return 'stageSelection';
     return 'game';
   };
