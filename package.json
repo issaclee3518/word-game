@@ -11,7 +11,7 @@
     "build": "expo export --platform web --output-dir dist && npm run flatten-dist",
     "build:web": "expo export --platform web --output-dir dist && npm run flatten-dist",
     "preview:web": "expo export --platform web && npx serve dist",
-    "flatten-dist": "node -e \"const fs=require('fs');const path=require('path');const jsFile=fs.readdirSync('dist/_expo/static/js/web/')[0];fs.copyFileSync('dist/_expo/static/js/web/'+jsFile,'dist/app.js');fs.rmSync('dist/_expo',{recursive:true,force:true});\""
+    "flatten-dist": "node -e \"const fs=require('fs');const path=require('path');const jsFile=fs.readdirSync('dist/_expo/static/js/web/')[0];fs.copyFileSync('dist/_expo/static/js/web/'+jsFile,'dist/app.js');fs.writeFileSync('dist/_redirects','/*    /index.html   200');fs.rmSync('dist/_expo',{recursive:true,force:true});\""
   },
   "dependencies": {
     "expo": "~54.0.12",
